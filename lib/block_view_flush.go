@@ -86,6 +86,9 @@ func (bav *UtxoView) FlushToDbWithTxn(txn *badger.Txn) error {
 		if err := bav._flushDerivedKeyEntryToDbWithTxn(txn); err != nil {
 			return err
 		}
+		if err := bav._flushDAOCoinLimitOrderEntriesToDbWithTxn(txn); err != nil {
+			return err
+		}
 	}
 
 	// Always flush to BadgerDB.
@@ -254,13 +257,13 @@ func (bav *UtxoView) _flushBitcoinExchangeDataWithTxn(txn *badger.Txn) error {
 
 	// Update NanosPurchased
 	if err := DbPutNanosPurchasedWithTxn(txn, bav.NanosPurchased); err != nil {
-		errors.Wrapf(err, "UtxoView._flushBitcoinExchangeDataWithTxn: "+
+		return errors.Wrapf(err, "UtxoView._flushBitcoinExchangeDataWithTxn: "+
 			"Problem putting NanosPurchased %d to db", bav.NanosPurchased)
 	}
 
 	// Update the BitcoinUSDExchangeRate in the db
 	if err := DbPutUSDCentsPerBitcoinExchangeRateWithTxn(txn, bav.USDCentsPerBitcoin); err != nil {
-		errors.Wrapf(err, "UtxoView.FlushToDBWithTxn: "+
+		return errors.Wrapf(err, "UtxoView.FlushToDBWithTxn: "+
 			"Problem putting USDCentsPerBitcoin %d to db", bav.USDCentsPerBitcoin)
 	}
 
@@ -486,7 +489,7 @@ func (bav *UtxoView) _flushNFTEntriesToDbWithTxn(txn *badger.Txn) error {
 func (bav *UtxoView) _flushAcceptedBidEntriesToDbWithTxn(txn *badger.Txn) error {
 
 	// Go through and delete all the entries so they can be added back fresh.
-	for nftKeyIter, _ := range bav.NFTKeyToAcceptedNFTBidHistory {
+	for nftKeyIter := range bav.NFTKeyToAcceptedNFTBidHistory {
 		// Make a copy of the iterator since we make references to it below.
 		nftKey := nftKeyIter
 
@@ -984,5 +987,58 @@ func (bav *UtxoView) _flushMessagingGroupEntriesToDbWithTxn(txn *badger.Txn) err
 	}
 
 	glog.V(1).Infof("_flushMessagingGroupEntriesToDbWithTxn: deleted %d mappings, put %d mappings", numDeleted, numPut)
+	return nil
+}
+
+func (bav *UtxoView) _flushDAOCoinLimitOrderEntriesToDbWithTxn(txn *badger.Txn) error {
+	glog.V(1).Infof("_flushDAOCoinLimitOrderEntriesToDbWithTxn: flushing %d mappings", len(bav.DAOCoinLimitOrderMapKeyToDAOCoinLimitOrderEntry))
+
+	// Go through all the entries in the DAOCoinLimitOrderMapKeyToDAOCoinLimitOrderEntry map.
+	for orderIter, orderEntry := range bav.DAOCoinLimitOrderMapKeyToDAOCoinLimitOrderEntry {
+		// Make a copy of the iterator since we take references to it below.
+		orderKey := orderIter
+
+		// Validate order map key matches order entry.
+		orderMapKey := orderEntry.ToMapKey()
+
+		if !reflect.DeepEqual(orderKey, orderMapKey) {
+			return fmt.Errorf("_flushDAOCoinLimitOrderEntriesToDbWithTxn: DAOCoinLimitOrderEntry has "+
+				"map key: %v which does not match match "+
+				"the DAOCoinLimitOrderMapKey map key %v",
+				orderMapKey, orderKey)
+		}
+
+		// Delete the existing mappings in the db for this balance key. They will be re-added
+		// if the corresponding entry in memory has isDeleted=false.
+		if err := DBDeleteDAOCoinLimitOrderWithTxn(txn, orderEntry); err != nil {
+			return errors.Wrapf(
+				err, "_flushDAOCoinLimitOrderEntriesToDbWithTxn: problem deleting mappings")
+		}
+	}
+
+	// Update logs with number of entries deleted and/ put.
+	numDeleted := 0
+	numPut := 0
+
+	// Go through all the entries in the DAOCoinLimitOrderMapKeyToDAOCoinLimitOrderEntry map.
+	for _, orderEntry := range bav.DAOCoinLimitOrderMapKeyToDAOCoinLimitOrderEntry {
+		// Make a copy of the iterator since we take references to it below.
+		if orderEntry.isDeleted {
+			numDeleted++
+			// If the OrderEntry has isDeleted=true then there's nothing to do because
+			// we already deleted the entry above.
+		} else {
+			numPut++
+			// If the OrderEntry has (isDeleted = false) then we put the corresponding
+			// mappings for it into the db.
+			if err := DBPutDAOCoinLimitOrderWithTxn(txn, orderEntry); err != nil {
+				return err
+			}
+		}
+	}
+
+	glog.V(1).Infof("_flushDAOCoinLimitOrderEntriesToDbWithTxn: deleted %d mappings, put %d mappings", numDeleted, numPut)
+
+	// At this point all of the DAO coin limit order mappings in the db should be up-to-date.
 	return nil
 }

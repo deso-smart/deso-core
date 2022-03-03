@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/holiman/uint256"
 	"log"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -69,6 +70,19 @@ const (
 
 var (
 	MaxUint256, _ = uint256.FromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+
+	// These values are used by the DAOCoinLimitOrder logic in order to convert
+	// fixed-point numbers to and from their exponentiated representation. For
+	// more info on how this works, see the comment on DAOCoinLimitOrderEntry.
+	//
+	// This value is a uint256 form of 1e38, or 10^38. We mainly use it to represent a
+	// "fixed-point" exchange rate when processing limit orders. See the comment on
+	// DAOCoinLimitOrderEntry for more info.
+	OneE38, _ = uint256.FromHex("0x4b3b4ca85a86c47a098a224000000000") // 1e38
+	// This is the number of base units within a single "coin". It is mainly used to
+	// convert from base units, which is what we deal with in core, to a human-readable
+	// value in the UI. It is equal to 1e18.
+	BaseUnitsPerCoin, _ = uint256.FromHex("0xde0b6b3a7640000") // 1e18
 )
 
 func (nt NetworkType) String() string {
@@ -170,6 +184,21 @@ type ForkHeights struct {
 	// DAOCoinBlockHeight defines the height at which DAO Coin and DAO Coin Transfer
 	// transactions will be accepted.
 	DAOCoinBlockHeight uint32
+
+	ExtraDataOnEntriesBlockHeight uint32
+
+	// DerivedKeySetSpendingLimitsBlockHeight defines the height at which derived key transactions will have their
+	// transaction spending limits in the extra data field parsed.
+	DerivedKeySetSpendingLimitsBlockHeight uint32
+
+	// DerivedKeyTrackSpendingLimitsBlockHeight defines the height at which derived key's transaction spending limits
+	// will come in effect - accounting of DESO spent and transaction counts will begin at this height. These heights
+	// are separated to allow developers time to generate new derived keys for their users. NOTE: this must always
+	// be greater than or equal to DerivedKeySetSpendingLimitsBlockHeight.
+	DerivedKeyTrackSpendingLimitsBlockHeight uint32
+
+	// DAOCoinLimitOrderBlockHeight defines the height at which DAO Coin Limit Order transactions will be accepted.
+	DAOCoinLimitOrderBlockHeight uint32
 }
 
 // DeSoParams defines the full list of possible parameters for the
@@ -398,10 +427,14 @@ func (params *DeSoParams) EnableRegtest() {
 		DeSoV3MessagesBlockHeight:                            uint32(0),
 		BuyNowAndNFTSplitsBlockHeight:                        uint32(0),
 		DAOCoinBlockHeight:                                   uint32(0),
+		ExtraDataOnEntriesBlockHeight:                        uint32(0),
+		DerivedKeySetSpendingLimitsBlockHeight:               uint32(0),
+		DerivedKeyTrackSpendingLimitsBlockHeight:             uint32(0),
+		DAOCoinLimitOrderBlockHeight:                         uint32(0),
 	}
 }
 
-// GenesisBlock defines the genesis block used for the DeSo maainnet and testnet
+// GenesisBlock defines the genesis block used for the DeSo mainnet and testnet
 var (
 	ArchitectPubKeyBase58Check = "BC1YLg3oh6Boj8e2boCo1vQCYHLk1rjsHF6jthBdvSw79bixQvKK6Qa"
 	// This is the public key corresponding to the BitcoinBurnAddress on mainnet.
@@ -640,6 +673,16 @@ var DeSoMainnetParams = DeSoParams{
 		DeSoV3MessagesBlockHeight:     uint32(98474),
 		BuyNowAndNFTSplitsBlockHeight: uint32(98474),
 		DAOCoinBlockHeight:            uint32(98474),
+
+		// FIXME: set to real block height
+		ExtraDataOnEntriesBlockHeight: math.MaxUint32,
+
+		// FIXME: Set these values when we're ready for the next fork.
+		DerivedKeySetSpendingLimitsBlockHeight:   math.MaxUint32,
+		DerivedKeyTrackSpendingLimitsBlockHeight: math.MaxUint32,
+
+		// FIXME: Set to real block height when we're ready.
+		DAOCoinLimitOrderBlockHeight: math.MaxUint32,
 	},
 }
 
@@ -807,6 +850,9 @@ var DeSoTestnetParams = DeSoParams{
 	CreatorCoinAutoSellThresholdNanos: uint64(10),
 
 	ForkHeights: ForkHeights{
+		// Get testnet height from here:
+		// - https://explorer.deso.org/?query-node=https:%2F%2Ftest.deso.org
+
 		// Initially, testnet fork heights were the same as mainnet heights
 		// This changed when we spun up a real testnet that runs independently
 		DeflationBombBlockHeight:                             33783,
@@ -825,6 +871,14 @@ var DeSoTestnetParams = DeSoParams{
 		DeSoV3MessagesBlockHeight:     uint32(97322),
 		BuyNowAndNFTSplitsBlockHeight: uint32(97322),
 		DAOCoinBlockHeight:            uint32(97322),
+
+		// Wed Apr 20 @ 9am ET
+		ExtraDataOnEntriesBlockHeight:          uint32(304087),
+		DerivedKeySetSpendingLimitsBlockHeight: uint32(304087),
+		// Add 18h for the spending limits to be checked, since this is how we're
+		// going to do it on mainnet. Testnet produces 60 blocks per hour.
+		DerivedKeyTrackSpendingLimitsBlockHeight: uint32(304087 + 18*60),
+		DAOCoinLimitOrderBlockHeight:             uint32(304087),
 	},
 }
 
@@ -889,6 +943,10 @@ const (
 	// Key in transaction's extra data map. If present, this value represents the Node ID of the running node. This maps
 	// to the map of nodes in ./lib/nodes.go
 	NodeSourceMapKey = "NodeSource"
+
+	// TransactionSpendingLimit
+	TransactionSpendingLimitKey = "TransactionSpendingLimit"
+	DerivedKeyMemoKey           = "DerivedKeyMemo"
 )
 
 // Defines values that may exist in a transaction's ExtraData map

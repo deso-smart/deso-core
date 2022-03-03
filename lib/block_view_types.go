@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec"
+	"github.com/golang/glog"
 	"github.com/holiman/uint256"
 	"github.com/pkg/errors"
 	"io"
+	"math"
+	"math/big"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -29,8 +33,9 @@ const (
 	UtxoTypeNFTBidderChange          UtxoType = 7
 	UtxoTypeNFTCreatorRoyalty        UtxoType = 8
 	UtxoTypeNFTAdditionalDESORoyalty UtxoType = 9
+	UtxoTypeDAOCoinLimitOrderPayout  UtxoType = 10
 
-	// NEXT_TAG = 10
+	// NEXT_TAG = 11
 )
 
 func (mm UtxoType) String() string {
@@ -120,8 +125,10 @@ const (
 	OperationTypeMessagingKey                 OperationType = 24
 	OperationTypeDAOCoin                      OperationType = 25
 	OperationTypeDAOCoinTransfer              OperationType = 26
+	OperationTypeSpendingLimitAccounting      OperationType = 27
+	OperationTypeDAOCoinLimitOrder            OperationType = 28
 
-	// NEXT_TAG = 27
+	// NEXT_TAG = 29
 )
 
 func (op OperationType) String() string {
@@ -229,6 +236,14 @@ func (op OperationType) String() string {
 	case OperationTypeDAOCoinTransfer:
 		{
 			return "OperationTypeDAOCoinTransfer"
+		}
+	case OperationTypeSpendingLimitAccounting:
+		{
+			return "OperationTypeSpendingLimitAccounting"
+		}
+	case OperationTypeDAOCoinLimitOrder:
+		{
+			return "OperationTypeDAOCoinLimitOrder"
 		}
 	}
 	return "OperationTypeUNKNOWN"
@@ -363,6 +378,27 @@ type UtxoOperation struct {
 	NFTBidCreatorDESORoyaltyNanos uint64
 	NFTBidAdditionalCoinRoyalties []*PublicKeyRoyaltyPair
 	NFTBidAdditionalDESORoyalties []*PublicKeyRoyaltyPair
+
+	// DAO coin limit order
+	// PrevTransactorDAOCoinLimitOrderEntry is the previous version of the
+	// transactor's DAO Coin Limit Order before this transaction was connected.
+	// Note: This is only set if the transactor is cancelling an existing order.
+	PrevTransactorDAOCoinLimitOrderEntry *DAOCoinLimitOrderEntry
+
+	// PrevBalanceEntries is a map of User PKID, Creator PKID to DAO Coin Balance
+	// Entry. When disconnecting a DAO Coin Limit Order, we will revert to these
+	// BalanceEntries.
+	PrevBalanceEntries map[PKID]map[PKID]*BalanceEntry
+
+	// PrevMatchingOrder is a slice of DAOCoinLimitOrderEntries that were deleted
+	// in the DAO Coin Limit Order Transaction. In order to revert the state in
+	// the event of a disconnect, we restore all the deleted Order Entries
+	PrevMatchingOrders []*DAOCoinLimitOrderEntry
+
+	// FilledDAOCoinLimitOrder is a slice of FilledDAOCoinLimitOrder structs
+	// that represent all orders fulfilled by the DAO Coin Limit Order transaction.
+	// These are used to construct notifications for order fulfillment.
+	FilledDAOCoinLimitOrders []*FilledDAOCoinLimitOrder
 }
 
 func (utxoEntry *UtxoEntry) String() string {
@@ -461,6 +497,9 @@ type MessageEntry struct {
 
 	// RecipientMessagingGroupKeyName is the recipient's key name of RecipientMessagingPublicKey
 	RecipientMessagingGroupKeyName *GroupKeyName
+
+	// Extra data
+	ExtraData map[string][]byte
 }
 
 func (message *MessageEntry) Encode() []byte {
@@ -475,6 +514,7 @@ func (message *MessageEntry) Encode() []byte {
 	data = append(data, EncodeByteArray(message.SenderMessagingGroupKeyName[:])...)
 	data = append(data, EncodeByteArray(message.RecipientMessagingPublicKey[:])...)
 	data = append(data, EncodeByteArray(message.RecipientMessagingGroupKeyName[:])...)
+	data = append(data, EncodeExtraData(message.ExtraData)...)
 	return data
 }
 
@@ -532,6 +572,19 @@ func (message *MessageEntry) Decode(data []byte) error {
 		return errors.Wrapf(err, "MessageEntry.Decode: problem decoding recipient messaging key name")
 	}
 	message.RecipientMessagingGroupKeyName = NewGroupKeyName(recipientMessagingKeyName)
+
+	extraData, err := DecodeExtraData(rr)
+	if err != nil && strings.Contains(err.Error(), "EOF") {
+		// To preserve backwards-compatibility, we set an empty map and return if we
+		// encounter an EOF error decoding ExtraData.
+		glog.Warning(err, "MesssageEntry.Decode: problem decoding extra data. "+
+			"Please resync your node to upgrade your datadir before the next hard fork.")
+		return nil
+	} else if err != nil {
+		return errors.Wrapf(err, "MesssageEntry.Decode: problem decoding extra data")
+	}
+	message.ExtraData = extraData
+
 	return nil
 }
 
@@ -632,6 +685,9 @@ type MessagingGroupEntry struct {
 	// is given to all group members.
 	MessagingGroupMembers []*MessagingGroupMember
 
+	// ExtraData is an arbitrary key value map
+	ExtraData map[string][]byte
+
 	// Whether this entry should be deleted when the view is flushed
 	// to the db. This is initially set to false, but can become true if
 	// we disconnect the messaging key from UtxoView
@@ -643,6 +699,20 @@ func (entry *MessagingGroupEntry) String() string {
 		entry.GroupOwnerPublicKey, entry.MessagingPublicKey, entry.MessagingGroupKeyName, entry.isDeleted)
 }
 
+func sortMessagingGroupMembers(membersArg []*MessagingGroupMember) []*MessagingGroupMember {
+	// Make a deep copy of the members to avoid messing up the slice the caller
+	// used. Not doing this could cause downstream effects, mainly in tests where
+	// the same slice is re-used in txns and in expectations later on.
+	members := make([]*MessagingGroupMember, len(membersArg))
+	copy(members, membersArg)
+	sort.Slice(members, func(ii, jj int) bool {
+		iiStr := PkToStringMainnet(members[ii].GroupMemberPublicKey[:]) + string(members[ii].GroupMemberKeyName[:]) + string(members[ii].EncryptedKey)
+		jjStr := PkToStringMainnet(members[jj].GroupMemberPublicKey[:]) + string(members[jj].GroupMemberKeyName[:]) + string(members[jj].EncryptedKey)
+		return iiStr < jjStr
+	})
+	return members
+}
+
 func (entry *MessagingGroupEntry) Encode() []byte {
 	var entryBytes []byte
 
@@ -650,9 +720,13 @@ func (entry *MessagingGroupEntry) Encode() []byte {
 	entryBytes = append(entryBytes, EncodeByteArray(entry.MessagingPublicKey[:])...)
 	entryBytes = append(entryBytes, EncodeByteArray(entry.MessagingGroupKeyName[:])...)
 	entryBytes = append(entryBytes, UintToBuf(uint64(len(entry.MessagingGroupMembers)))...)
-	for ii := 0; ii < len(entry.MessagingGroupMembers); ii++ {
-		entryBytes = append(entryBytes, entry.MessagingGroupMembers[ii].Encode()...)
+	// We sort the MessagingGroupMembers because they can be added while iterating over
+	// a map, which could lead to inconsistent orderings across nodes when encoding.
+	members := sortMessagingGroupMembers(entry.MessagingGroupMembers)
+	for ii := 0; ii < len(members); ii++ {
+		entryBytes = append(entryBytes, members[ii].Encode()...)
 	}
+	entryBytes = append(entryBytes, EncodeExtraData(entry.ExtraData)...)
 	return entryBytes
 }
 
@@ -690,6 +764,18 @@ func (entry *MessagingGroupEntry) Decode(data []byte) error {
 
 		entry.MessagingGroupMembers = append(entry.MessagingGroupMembers, &recipient)
 	}
+
+	extraData, err := DecodeExtraData(rr)
+	if err != nil && strings.Contains(err.Error(), "EOF") {
+		// To preserve backwards-compatibility, we set an empty map and return if we
+		// encounter an EOF error decoding ExtraData.
+		glog.Warning(err, "MessagingGroupEntry.Decode: problem decoding extra data. "+
+			"Please resync your node to upgrade your datadir before the next hard fork.")
+		return nil
+	} else if err != nil {
+		return errors.Wrapf(err, "MessagingGroupEntry.Decode: Problem decoding extra data")
+	}
+	entry.ExtraData = extraData
 
 	return nil
 }
@@ -818,6 +904,8 @@ type NFTEntry struct {
 	// If an NFT is a Buy Now NFT, it can be purchased for this price.
 	BuyNowPriceNanos uint64
 
+	ExtraData map[string][]byte
+
 	// Whether or not this entry is deleted in the view.
 	isDeleted bool
 }
@@ -876,8 +964,29 @@ type DerivedKeyEntry struct {
 	// authorized or de-authorized.
 	OperationType AuthorizeDerivedKeyOperationType
 
+	ExtraData map[string][]byte
+
+	// Transaction Spending limit Tracker
+	TransactionSpendingLimitTracker *TransactionSpendingLimit
+
+	// Memo that tells you what this derived key is for. Should
+	// include the name or domain of the app that asked for these
+	// permissions so the user can manage it from a centralized UI.
+	Memo []byte
+
 	// Whether or not this entry is deleted in the view.
 	isDeleted bool
+}
+
+func (dk *DerivedKeyEntry) Copy() *DerivedKeyEntry {
+	if dk == nil {
+		return nil
+	}
+	newEntry := *dk
+	if dk.TransactionSpendingLimitTracker != nil {
+		newEntry.TransactionSpendingLimitTracker = dk.TransactionSpendingLimitTracker.Copy()
+	}
+	return &newEntry
 }
 
 type DerivedKeyMapKey struct {
@@ -1103,6 +1212,9 @@ type PostEntry struct {
 	AdditionalNFTRoyaltiesToCoinsBasisPoints map[PKID]uint64
 
 	// ExtraData map to hold arbitrary attributes of a post. Holds non-consensus related information about a post.
+	// TODO: Change to just ExtraData. Will be easy to do once we have hypersync
+	// encoders/decoders, but for now doing so would mess up GOB encoding so we'll
+	// wait.
 	PostExtraData map[string][]byte
 }
 
@@ -1165,6 +1277,16 @@ type BalanceEntry struct {
 
 	// Whether or not this entry is deleted in the view.
 	isDeleted bool
+}
+
+func (entry *BalanceEntry) Copy() *BalanceEntry {
+	return &BalanceEntry{
+		HODLerPKID:   entry.HODLerPKID.NewPKID(),
+		CreatorPKID:  entry.CreatorPKID.NewPKID(),
+		BalanceNanos: *entry.BalanceNanos.Clone(),
+		HasPurchased: entry.HasPurchased,
+		isDeleted:    entry.isDeleted,
+	}
 }
 
 type TransferRestrictionStatus uint8
@@ -1303,6 +1425,10 @@ type ProfileEntry struct {
 	// 3. CoinWaterMarkNanos
 	DAOCoinEntry CoinEntry
 
+	// ExtraData map to hold arbitrary attributes of a profile. Holds
+	// non-consensus related information about a profile.
+	ExtraData map[string][]byte
+
 	// Whether or not this entry should be deleted when the view is flushed
 	// to the db. This is initially set to false, but can become true if for
 	// example we update a user entry and need to delete the data associated
@@ -1340,5 +1466,361 @@ func DecodeByteArray(reader io.Reader) ([]byte, error) {
 		return result, nil
 	} else {
 		return []byte{}, nil
+	}
+}
+
+// -----------------------------------
+// DAO coin limit order
+// -----------------------------------
+
+type DAOCoinLimitOrderEntry struct {
+	// OrderID is the txn hash (unique identifier) for this order.
+	OrderID *BlockHash
+	// TransactorPKID is the PKID of the user who created this order.
+	TransactorPKID *PKID
+	// The PKID of the coin that we're going to buy
+	BuyingDAOCoinCreatorPKID *PKID
+	// The PKID of the coin that we're going to sell
+	SellingDAOCoinCreatorPKID *PKID
+	// ScaledExchangeRateCoinsToSellPerCoinToBuy specifies how many of the coins
+	// associated with SellingDAOCoinCreatorPKID we need to convert in order
+	// to get one BuyingDAOCoinCreatorPKID. For example, if this value was
+	// 2, then we would need to convert 2 SellingDAOCoinCreatorPKID
+	// coins to get 1 BuyingDAOCoinCreatorPKID. Note, however, that to represent
+	// 2, we would actually have to set ScaledExchangeRateCoinsToSellPerCoinToBuy to
+	// be equal to 2*1e38 because of the representation format we describe
+	// below.
+	//
+	// The exchange rate is represented as a fixed-point value, which works
+	// as follows:
+	// - Whenever we reference an exchange rate, call it Y, we pass it
+	//   around as a uint256 BUT we consider it to be implicitly divided
+	//   by 1e38.
+	// - For example, to represent a decimal number like 123456789.987654321,
+	//   call it X, we would pass around Y = X*1e38 = 1234567899876543210000000000000000000000000000
+	//   as a uint256.
+	//   Then, to do operations with Y, we would make sure to always divide by
+	//   1e38 before returning a final quantity.
+	// - We will refer to Y as "scaled." The value of ScaledExchangeRateCoinsToSellPerCoinToBuy
+	//   will always be scaled, meaning it is a uint256 that we implicitly
+	//   assume represents a number that is divided by 1e38.
+	//
+	// This scheme is also referred to as "fixed point," and a similar scheme
+	// is utilized by Uniswap. You can learn more about how this works here:
+	// - https://en.wikipedia.org/wiki/Q_(number_format)
+	// - https://ethereum.org/de/developers/tutorials/uniswap-v2-annotated-code/#FixedPoint
+	// - https://uniswap.org/whitepaper.pdf
+	ScaledExchangeRateCoinsToSellPerCoinToBuy *uint256.Int
+	// QuantityBaseUnits expresses how many "base units" of the coin this order is
+	// buying. Note that we could have called this QuantityToBuyNanos, and in the
+	// case where we're buying DESO, the base unit is a "nano." However, we call it
+	// "base unit" rather than nano because other DAO coins might decide to use a
+	// different scheme than nanos for their base unit. In particular, we expect 1e18
+	// base units to equal 1 DAO coin, rather than using nanos.
+	QuantityToFillInBaseUnits *uint256.Int
+	// This is one of ASK or BID. If the operation type is an ASK, then the quantity
+	// column applies to the selling coin. I.e. the order is considered fulfilled
+	// once the selling coin quantity to fill is zero. If the operation type is a BID,
+	// then quantity column applies to the buying coin. I.e. the order is considered
+	// fulfilled once the buying coin quantity to fill is zero.
+	OperationType DAOCoinLimitOrderOperationType
+	// This is the block height at which the order was placed. We use the block height
+	// to break ties between orders. If there are two orders that could be filled, we
+	// pick the one that was submitted earlier.
+	BlockHeight uint32
+
+	isDeleted bool
+}
+
+type DAOCoinLimitOrderOperationType uint64
+
+const (
+	// We intentionally skip zero as otherwise that would be the default value.
+	DAOCoinLimitOrderOperationTypeASK DAOCoinLimitOrderOperationType = 1
+	DAOCoinLimitOrderOperationTypeBID DAOCoinLimitOrderOperationType = 2
+)
+
+// FilledDAOCoinLimitOrder only exists to support understanding what orders were
+// fulfilled when connecting a DAO Coin Limit Order Txn
+type FilledDAOCoinLimitOrder struct {
+	OrderID                       *BlockHash
+	TransactorPKID                *PKID
+	BuyingDAOCoinCreatorPKID      *PKID
+	SellingDAOCoinCreatorPKID     *PKID
+	CoinQuantityInBaseUnitsBought *uint256.Int
+	CoinQuantityInBaseUnitsSold   *uint256.Int
+	IsFulfilled                   bool
+}
+
+func (order *DAOCoinLimitOrderEntry) Copy() *DAOCoinLimitOrderEntry {
+	return &DAOCoinLimitOrderEntry{
+		OrderID:                   order.OrderID.NewBlockHash(),
+		TransactorPKID:            order.TransactorPKID.NewPKID(),
+		BuyingDAOCoinCreatorPKID:  order.BuyingDAOCoinCreatorPKID.NewPKID(),
+		SellingDAOCoinCreatorPKID: order.SellingDAOCoinCreatorPKID.NewPKID(),
+		ScaledExchangeRateCoinsToSellPerCoinToBuy: order.ScaledExchangeRateCoinsToSellPerCoinToBuy.Clone(),
+		QuantityToFillInBaseUnits:                 order.QuantityToFillInBaseUnits.Clone(),
+		OperationType:                             order.OperationType,
+		BlockHeight:                               order.BlockHeight,
+		isDeleted:                                 order.isDeleted,
+	}
+}
+
+func (order *DAOCoinLimitOrderEntry) ToBytes() ([]byte, error) {
+	data := append([]byte{}, order.OrderID.ToBytes()...)
+	data = append(data, order.TransactorPKID.Encode()...)
+	data = append(data, order.BuyingDAOCoinCreatorPKID.Encode()...)
+	data = append(data, order.SellingDAOCoinCreatorPKID.Encode()...)
+	data = append(data, EncodeUint256(order.ScaledExchangeRateCoinsToSellPerCoinToBuy)...)
+	data = append(data, EncodeUint256(order.QuantityToFillInBaseUnits)...)
+	data = append(data, UintToBuf(uint64(order.OperationType))...)
+	data = append(data, UintToBuf(uint64(order.BlockHeight))...)
+	return data, nil
+}
+
+func (order *DAOCoinLimitOrderEntry) FromBytes(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	ret := DAOCoinLimitOrderEntry{}
+	rr := bytes.NewReader(data)
+	var err error
+
+	// Parse OrderID
+	ret.OrderID, err = ReadBlockHash(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading OrderID: %v", err)
+	}
+
+	// Parse TransactorPKID
+	ret.TransactorPKID, err = ReadPKID(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading TransactorPKID: %v", err)
+	}
+
+	// Parse BuyingDAOCoinCreatorPKID
+	ret.BuyingDAOCoinCreatorPKID, err = ReadPKID(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading BuyingDAOCoinCreatorPKID: %v", err)
+	}
+
+	// Parse SellingDAOCoinCreatorPublicKey
+	ret.SellingDAOCoinCreatorPKID, err = ReadPKID(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading SellingDAOCoinCreatorPKID: %v", err)
+	}
+
+	// Parse ScaledExchangeRateCoinsToSellPerCoinToBuy
+	ret.ScaledExchangeRateCoinsToSellPerCoinToBuy, err = ReadUint256(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading ScaledPrice: %v", err)
+	}
+
+	// Parse QuantityToFillInBaseUnits
+	ret.QuantityToFillInBaseUnits, err = ReadUint256(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading QuantityToFillInBaseUnits: %v", err)
+	}
+
+	// Parse OperationType
+	operationType, err := ReadUvarint(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading OperationType: %v", err)
+	}
+	ret.OperationType = DAOCoinLimitOrderOperationType(operationType)
+
+	// Parse BlockHeight
+	var blockHeight uint64
+	blockHeight, err = ReadUvarint(rr)
+	if err != nil {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Error reading BlockHeight: %v", err)
+	}
+	if blockHeight > uint64(math.MaxUint32) {
+		return fmt.Errorf("DAOCoinLimitOrderEntry.FromBytes: Invalid block height %d: Greater than max uint32", blockHeight)
+	}
+	ret.BlockHeight = uint32(blockHeight)
+
+	*order = ret
+	return nil
+}
+
+func (order *DAOCoinLimitOrderEntry) IsBetterMatchingOrderThan(other *DAOCoinLimitOrderEntry) bool {
+	// We prefer the order with the higher exchange rate. This would result
+	// in more of their selling DAO coin being offered to the transactor
+	// for each of the corresponding buying DAO coin.
+	if !order.ScaledExchangeRateCoinsToSellPerCoinToBuy.Eq(
+		other.ScaledExchangeRateCoinsToSellPerCoinToBuy) {
+
+		// order.ScaledPrice > other.ScaledPrice
+		return order.ScaledExchangeRateCoinsToSellPerCoinToBuy.Gt(
+			other.ScaledExchangeRateCoinsToSellPerCoinToBuy)
+	}
+
+	// FIFO, prefer older orders first, i.e. lower block height.
+	if order.BlockHeight != other.BlockHeight {
+		return order.BlockHeight < other.BlockHeight
+	}
+
+	// To break a tie and guarantee idempotency in sorting,
+	// prefer higher OrderIDs. This matches the BadgerDB
+	// ordering where we SEEK descending.
+	return bytes.Compare(order.OrderID.ToBytes(), other.OrderID.ToBytes()) > 0
+}
+
+func (order *DAOCoinLimitOrderEntry) BaseUnitsToBuyUint256() (*uint256.Int, error) {
+	if order.OperationType == DAOCoinLimitOrderOperationTypeASK {
+		// In this case, the quantity specified in the order is the amount to sell,
+		// so needs to be converted.
+		return ComputeBaseUnitsToBuyUint256(
+			order.ScaledExchangeRateCoinsToSellPerCoinToBuy,
+			order.QuantityToFillInBaseUnits)
+	} else if order.OperationType == DAOCoinLimitOrderOperationTypeBID {
+		// In this case, the quantity specified in the order is the amount to buy,
+		// so can be returned as-is.
+		return order.QuantityToFillInBaseUnits, nil
+	} else {
+		return nil, fmt.Errorf("Invalid OperationType %v", order.OperationType)
+	}
+}
+
+func ComputeBaseUnitsToBuyUint256(
+	scaledExchangeRateCoinsToSellPerCoinToBuy *uint256.Int,
+	quantityToSellBaseUnits *uint256.Int) (*uint256.Int, error) {
+	// Converts quantity to sell to quantity to buy according to the given exchange rate.
+	// Quantity to buy
+	//	 = Scaling factor * Quantity to sell / Scaled exchange rate coins to sell per coin to buy
+	//	 = Scaling factor * Quantity to sell / (Scaling factor * Quantity to sell / Quantity to Buy)
+	//	 = 1 / (1 / Quantity to buy)
+	//	 = Quantity to buy
+
+	// Perform a few validations.
+	if scaledExchangeRateCoinsToSellPerCoinToBuy == nil ||
+		scaledExchangeRateCoinsToSellPerCoinToBuy.IsZero() {
+		// This should never happen.
+		return nil, fmt.Errorf("ComputeBaseUnitsToBuyUint256: passed invalid exchange rate")
+	}
+
+	if quantityToSellBaseUnits == nil || quantityToSellBaseUnits.IsZero() {
+		// This should never happen.
+		return nil, fmt.Errorf("ComputeBaseUnitsToBuyUint256: passed invalid quantity to sell")
+	}
+
+	// Perform calculation.
+	scaledQuantityToSellBigInt := big.NewInt(0).Mul(
+		OneE38.ToBig(), quantityToSellBaseUnits.ToBig())
+
+	quantityToBuyBigInt := big.NewInt(0).Div(
+		scaledQuantityToSellBigInt, scaledExchangeRateCoinsToSellPerCoinToBuy.ToBig())
+
+	// Check for overflow.
+	if quantityToBuyBigInt.Cmp(MaxUint256.ToBig()) > 0 {
+		return nil, errors.Wrapf(
+			RuleErrorDAOCoinLimitOrderTotalCostOverflowsUint256,
+			"ComputeBaseUnitsToBuyUint256: scaledExchangeRateCoinsToSellPerCoinToBuy: %v, "+
+				"quantityToSellBaseUnits: %v",
+			scaledExchangeRateCoinsToSellPerCoinToBuy.Hex(),
+			quantityToSellBaseUnits.Hex())
+	}
+
+	// We don't trust the overflow checker in uint256. It's too risky because
+	// it could cause a money printer bug if there's a problem with it. We
+	// manually check for overflow above.
+	quantityToBuyUint256, _ := uint256.FromBig(quantityToBuyBigInt)
+
+	// Error if resulting quantity to buy is < 1 base unit.
+	if quantityToBuyUint256.IsZero() {
+		return nil, RuleErrorDAOCoinLimitOrderTotalCostIsLessThanOneNano
+	}
+
+	return quantityToBuyUint256, nil
+}
+
+func (order *DAOCoinLimitOrderEntry) BaseUnitsToSellUint256() (*uint256.Int, error) {
+	if order.OperationType == DAOCoinLimitOrderOperationTypeBID {
+		// In this case, the quantity specified in the order is the amount to buy,
+		// so needs to be converted.
+		return ComputeBaseUnitsToSellUint256(
+			order.ScaledExchangeRateCoinsToSellPerCoinToBuy,
+			order.QuantityToFillInBaseUnits)
+	} else if order.OperationType == DAOCoinLimitOrderOperationTypeASK {
+		// In this case, the quantity specified in the order is the amount to sell,
+		// so can be returned as-is.
+		return order.QuantityToFillInBaseUnits, nil
+	} else {
+		return nil, fmt.Errorf("Invalid OperationType %v", order.OperationType)
+	}
+}
+
+func ComputeBaseUnitsToSellUint256(
+	scaledExchangeRateCoinsToSellPerCoinToBuy *uint256.Int,
+	quantityToBuyBaseUnits *uint256.Int) (*uint256.Int, error) {
+	// Converts quantity to buy to quantity to sell according to the given exchange rate.
+	// Quantity to sell
+	//   = Scaled exchange rate coins to sell per coin to buy * Quantity to buy / Scaling factor
+	//   = (Scaling factor * Quantity to sell / Quantity to buy) * Quantity to buy / Scaling factor
+	//   = Quantity to sell
+
+	// Perform a few validations.
+	if scaledExchangeRateCoinsToSellPerCoinToBuy == nil ||
+		scaledExchangeRateCoinsToSellPerCoinToBuy.IsZero() {
+		// This should never happen.
+		return nil, fmt.Errorf("ComputeBaseUnitsToBuyUint256: passed invalid exchange rate")
+	}
+
+	if quantityToBuyBaseUnits == nil || quantityToBuyBaseUnits.IsZero() {
+		// This should never happen.
+		return nil, fmt.Errorf("ComputeBaseUnitsToBuyUint256: passed invalid quantity to buy")
+	}
+
+	// Perform calculation.
+	// Note that we account for overflow here. Not doing this could result
+	// in a money printer bug. You need to check the following:
+	// scaledExchangeRateCoinsToSellPerCoinToBuy * quantityToBuyBaseUnits < uint256max
+	// -> scaledExchangeRateCoinsToSellPerCoinToBuy < uint256max / quantitybaseunits
+	//
+	// The division afterward is inherently safe so no need to check it.
+
+	// Returns the total cost of the inputted price x quantity as a uint256.
+	scaledQuantityToSellBigint := big.NewInt(0).Mul(
+		scaledExchangeRateCoinsToSellPerCoinToBuy.ToBig(),
+		quantityToBuyBaseUnits.ToBig())
+
+	// Check for overflow.
+	if scaledQuantityToSellBigint.Cmp(MaxUint256.ToBig()) > 0 {
+		return nil, errors.Wrapf(
+			RuleErrorDAOCoinLimitOrderTotalCostOverflowsUint256,
+			"ComputeBaseUnitsToSellUint256: scaledExchangeRateCoinsToSellPerCoinToBuy: %v, "+
+				"quantityToBuyBaseUnits: %v",
+			scaledExchangeRateCoinsToSellPerCoinToBuy.Hex(),
+			quantityToBuyBaseUnits.Hex())
+	}
+
+	// We don't trust the overflow checker in uint256. It's too risky because
+	// it could cause a money printer bug if there's a problem with it. We
+	// manually check for overflow above.
+	scaledQuantityToSellUint256, _ := uint256.FromBig(scaledQuantityToSellBigint)
+	quantityToSellUint256, err := SafeUint256().Div(scaledQuantityToSellUint256, OneE38)
+	if err != nil {
+		// This should never happen as we're dividing by a known constant.
+		return nil, errors.Wrapf(err, "ComputeBaseUnitsToSellUint256: ")
+	}
+
+	// Error if resulting quantity to sell is < 1 base unit.
+	if quantityToSellUint256.IsZero() {
+		return nil, RuleErrorDAOCoinLimitOrderTotalCostIsLessThanOneNano
+	}
+
+	return quantityToSellUint256, nil
+}
+
+type DAOCoinLimitOrderMapKey struct {
+	// An OrderID uniquely identifies an order
+	OrderID BlockHash
+}
+
+func (order *DAOCoinLimitOrderEntry) ToMapKey() DAOCoinLimitOrderMapKey {
+	return DAOCoinLimitOrderMapKey{
+		OrderID: *order.OrderID.NewBlockHash(),
 	}
 }
