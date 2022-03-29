@@ -3735,7 +3735,7 @@ func (bc *Blockchain) CreateMessagingKeyTxn(
 	messagingOwnerKeySignature []byte,
 	members []*MessagingGroupMember,
 	minFeeRateNanosPerKB uint64, mempool *DeSoMempool, additionalOutputs []*DeSoOutput) (
-    	_txn *MsgDeSoTxn, _totalInput uint64, _changeAmount uint64, _fees uint64, _err error) {
+	_txn *MsgDeSoTxn, _totalInput uint64, _changeAmount uint64, _fees uint64, _err error) {
 
 	// We don't need to validate info here, so just construct the transaction instead.
 	txn := &MsgDeSoTxn{

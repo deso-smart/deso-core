@@ -637,9 +637,9 @@ var DeSoMainnetParams = DeSoParams{
 		NFTTransferOrBurnAndDerivedKeysBlockHeight:           uint32(60743),
 
 		// Mon Jan 24 @ 12pm PST
-		DeSoV3MessagesBlockHeight:                            uint32(98474),
-		BuyNowAndNFTSplitsBlockHeight:                        uint32(98474),
-		DAOCoinBlockHeight:                                   uint32(98474),
+		DeSoV3MessagesBlockHeight:     uint32(98474),
+		BuyNowAndNFTSplitsBlockHeight: uint32(98474),
+		DAOCoinBlockHeight:            uint32(98474),
 	},
 }
 
@@ -822,9 +822,9 @@ var DeSoTestnetParams = DeSoParams{
 		// Flags after this point can differ from mainnet
 
 		// Thu Jan 20 @ 12pm PST
-		DeSoV3MessagesBlockHeight:                            uint32(97322),
-		BuyNowAndNFTSplitsBlockHeight:                        uint32(97322),
-		DAOCoinBlockHeight:                                   uint32(97322),
+		DeSoV3MessagesBlockHeight:     uint32(97322),
+		BuyNowAndNFTSplitsBlockHeight: uint32(97322),
+		DAOCoinBlockHeight:            uint32(97322),
 	},
 }
 
@@ -882,9 +882,9 @@ const (
 
 	// Used to distinguish v3 messages from previous iterations
 	MessagesVersionString = "V"
-	MessagesVersion1 = 1
-	MessagesVersion2 = 2
-	MessagesVersion3 = 3
+	MessagesVersion1      = 1
+	MessagesVersion2      = 2
+	MessagesVersion3      = 3
 
 	// Key in transaction's extra data map. If present, this value represents the Node ID of the running node. This maps
 	// to the map of nodes in ./lib/nodes.go
