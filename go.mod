@@ -1,4 +1,4 @@
-module github.com/deso-protocol/core
+module github.com/deso-smart/deso-core/v2
 
 go 1.14
 
