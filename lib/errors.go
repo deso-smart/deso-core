@@ -247,7 +247,7 @@ const (
 
 	// DAO Coin Limit Orders
 	RuleErrorDAOCoinLimitOrderBeforeBlockHeight                       RuleError = "RuleErrorDAOCoinLimitOrderBeforeBlockHeight"
-	RuleErrorDAOCoinLimitOrderInvalidOrderID                          RuleError = "RuleErrorDAOCoinLimitOrderInvalidOrderID"
+	RuleErrorDAOCoinLimitOrderInvalidTransactorPKID                   RuleError = "RuleErrorDAOCoinLimitOrderInvalidTransactorPKID"
 	RuleErrorDAOCoinLimitOrderInvalidBuyingDAOCoinCreatorPKID         RuleError = "RuleErrorDAOCoinLimitOrderInvalidBuyingDAOCoinCreatorPKID"
 	RuleErrorDAOCoinLimitOrderInvalidSellingDAOCoinCreatorPKID        RuleError = "RuleErrorDAOCoinLimitOrderInvalidSellingDAOCoinCreatorPKID"
 	RuleErrorDAOCoinLimitOrderCannotBuyAndSellSameCoin                RuleError = "RuleErrorDAOCoinLimitOrderCannotBuyAndSellSameCoin"
@@ -277,6 +277,8 @@ const (
 	RuleErrorDAOCoinLimitOrderFeeNanosBelowMinTxFee                   RuleError = "RuleErrorDAOCoinLimitOrderFeeNanosBelowMinTxFee"
 	RuleErrorDAOCoinLimitOrderFeeNanosOverflow                        RuleError = "RuleErrorDAOCoinLimitOrderFeeNanosOverflow"
 	RuleErrorDAOCoinLimitOrderTotalInputMinusTotalOutputNotEqualToFee RuleError = "RuleErrorDAOCoinLimitOrderTotalInputMinusTotalOutputNotEqualToFee"
+	RuleErrorDAOCoinLimitOrderInvalidFillType                         RuleError = "RuleErrorDAOCoinLimitOrderInvalidFillType"
+	RuleErrorDAOCoinLimitOrderFillOrKillOrderUnfulfilled              RuleError = "RuleErrorDAOCoinLimitOrderFillOrKillOrderUnfulfilled"
 
 	// Derived Keys
 	RuleErrorAuthorizeDerivedKeyAccessSignatureNotValid RuleError = "RuleErrorAuthorizeDerivedKeyAccessSignatureNotValid"

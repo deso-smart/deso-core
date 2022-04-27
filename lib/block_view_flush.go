@@ -257,13 +257,13 @@ func (bav *UtxoView) _flushBitcoinExchangeDataWithTxn(txn *badger.Txn) error {
 
 	// Update NanosPurchased
 	if err := DbPutNanosPurchasedWithTxn(txn, bav.NanosPurchased); err != nil {
-		return errors.Wrapf(err, "UtxoView._flushBitcoinExchangeDataWithTxn: "+
+		errors.Wrapf(err, "UtxoView._flushBitcoinExchangeDataWithTxn: "+
 			"Problem putting NanosPurchased %d to db", bav.NanosPurchased)
 	}
 
 	// Update the BitcoinUSDExchangeRate in the db
 	if err := DbPutUSDCentsPerBitcoinExchangeRateWithTxn(txn, bav.USDCentsPerBitcoin); err != nil {
-		return errors.Wrapf(err, "UtxoView.FlushToDBWithTxn: "+
+		errors.Wrapf(err, "UtxoView.FlushToDBWithTxn: "+
 			"Problem putting USDCentsPerBitcoin %d to db", bav.USDCentsPerBitcoin)
 	}
 
