@@ -264,6 +264,47 @@ func (srv *Server) VerifyAndBroadcastTransaction(txn *MsgDeSoTxn) error {
 	return nil
 }
 
+type NodeSyncType string
+
+const (
+	// Note that "any" forces the node to be archival in order to remain
+	// backwards-compatible with the rest of the network. This may change
+	// in the future.
+	NodeSyncTypeAny               = "any"
+	NodeSyncTypeBlockSync         = "blocksync"
+	NodeSyncTypeHyperSyncArchival = "hypersync-archival"
+	NodeSyncTypeHyperSync         = "hypersync"
+)
+
+func IsNodeArchival(syncType NodeSyncType) bool {
+	return syncType == NodeSyncTypeAny ||
+		syncType == NodeSyncTypeHyperSyncArchival ||
+		syncType == NodeSyncTypeBlockSync
+}
+
+func NodeCanHypersyncState(syncType NodeSyncType) bool {
+	// We can hypersync state from another node in all cases except
+	// where block sync is required.
+	return syncType != NodeSyncTypeBlockSync
+}
+
+func ValidateHyperSyncFlags(isHypersync bool, syncType NodeSyncType) {
+	if syncType != NodeSyncTypeAny &&
+		syncType != NodeSyncTypeBlockSync &&
+		syncType != NodeSyncTypeHyperSyncArchival &&
+		syncType != NodeSyncTypeHyperSync {
+		glog.Fatalf("Unrecognized --sync-type flag %v", syncType)
+	}
+	if !isHypersync &&
+		syncType == NodeSyncTypeHyperSync {
+		glog.Fatal("Cannot set --sync-type=hypersync without also setting --hypersync=true")
+	}
+	if !isHypersync &&
+		syncType == NodeSyncTypeHyperSyncArchival {
+		glog.Fatal("Cannot set --sync-type=hypersync-archival without also setting --hypersync=true")
+	}
+}
+
 // NewServer initializes all of the internal data structures. Right now this basically
 // looks as follows:
 // - ConnectionManager starts and keeps track of peers.
@@ -301,9 +342,8 @@ func NewServer(
 	_numMiningThreads uint64,
 	_limitOneInboundConnectionPerIP bool,
 	_hyperSync bool,
-	_disableSlowSync bool,
+	_syncType NodeSyncType,
 	_maxSyncBlockHeight uint32,
-	_archivalMode bool,
 	_disableEncoderMigrations bool,
 	_rateLimitFeerateNanosPerKB uint64,
 	_minFeeRateNanosPerKB uint64,
@@ -339,7 +379,7 @@ func NewServer(
 		}
 
 		// We only set archival mode true if we're a hypersync node.
-		if _archivalMode {
+		if IsNodeArchival(_syncType) {
 			archivalMode = true
 		}
 	}
@@ -364,7 +404,7 @@ func NewServer(
 	_cmgr := NewConnectionManager(
 		_params, _desoAddrMgr, _listeners, _connectIps, timesource,
 		_targetOutboundPeers, _maxInboundPeers, _limitOneInboundConnectionPerIP,
-		_hyperSync, _disableSlowSync, _stallTimeoutSeconds, _minFeeRateNanosPerKB,
+		_hyperSync, _syncType, _stallTimeoutSeconds, _minFeeRateNanosPerKB,
 		_incomingMessages, srv)
 
 	// Set up the blockchain data structure. This is responsible for accepting new
@@ -823,7 +863,7 @@ func (srv *Server) _handleHeaderBundle(pp *Peer, msg *MsgDeSoHeaderBundle) {
 		// If we get here it means that we've just finished syncing headers and we will proceed to
 		// syncing state either through hyper sync or block sync. First let's check if the peer
 		// supports hypersync and if our block tip is old enough so that it makes sense to sync state.
-		if (pp.serviceFlags&SFHyperSync) != 0 && srv.blockchain.isHyperSyncCondition() {
+		if NodeCanHypersyncState(srv.cmgr.SyncType) && srv.blockchain.isHyperSyncCondition() {
 			// If hypersync conditions are satisfied, we will be syncing state. This assignment results
 			// in srv.blockchain.chainState() to be equal to SyncStateSyncingSnapshot
 			srv.blockchain.syncingState = true
@@ -847,7 +887,7 @@ func (srv *Server) _handleHeaderBundle(pp *Peer, msg *MsgDeSoHeaderBundle) {
 					"will quickly download a snapshot of the blockchain taken at height (%v). HyperSync will sync each "+
 					"prefix of the node's KV database. Connected peer (%v). Note: State sync is a new feature and hence "+
 					"might contain some unexpected behavior. If you see an issue, please report it in DeSo Github "+
-					"https://github.com/deso-smart/deso-core/v2.", expectedSnapshotHeight, pp)))
+					"https://github.com/deso-protocol/core.", expectedSnapshotHeight, pp)))
 
 				// Clean all the state prefixes from the node db so that we can populate it with snapshot entries.
 				// When we start a node, it first loads a bunch of seed transactions in the genesis block. We want to
@@ -1264,7 +1304,7 @@ func (srv *Server) _handleSnapshot(pp *Peer, msg *MsgDeSoSnapshotData) {
 		}
 		glog.Errorf(CLog(Red, fmt.Sprintf("Server._handleSnapshot: The final db checksum doesn't match the "+
 			"checksum received from the peer. It is likely that HyperSync encountered some unexpected error earlier. "+
-			"You should report this as an issue on DeSo github https://github.com/deso-smart/deso-core/v2. It is also possible "+
+			"You should report this as an issue on DeSo github https://github.com/deso-protocol/core. It is also possible "+
 			"that the peer is misbehaving and sent invalid snapshot chunks. In either way, we'll restart the node and "+
 			"attempt to HyperSync from the beginning.")))
 		return
