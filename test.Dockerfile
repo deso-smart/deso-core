@@ -1,24 +1,22 @@
-FROM alpine:latest AS core
+FROM golang:1.17-alpine3.15 AS builder
 
-RUN apk update
-RUN apk upgrade
-RUN apk add --update go gcc g++ vips vips-dev
+RUN apk --no-cache add gcc g++ vips-dev upx
 
-WORKDIR /deso/src/core
+WORKDIR /usr/src/deso/core
 
 COPY go.mod .
 COPY go.sum .
 
-RUN go mod download
+RUN go mod download && go mod verify
 
+COPY cmd cmd
 COPY desohash desohash
-COPY cmd       cmd
-COPY lib       lib
+COPY lib lib
+COPY migrate migrate
 COPY test_data test_data
-COPY migrate   migrate
-COPY main.go   .
+COPY main.go .
 
-# build backend
-RUN GOOS=linux go build -mod=mod -a -installsuffix cgo -o bin/core main.go
+RUN GOOS=linux go build -ldflags "-s -w" -o /usr/local/bin/deso-core main.go
+RUN upx /usr/local/bin/deso-core
 
 ENTRYPOINT ["go", "test", "-v", "github.com/deso-smart/deso-core/v2/lib"]
