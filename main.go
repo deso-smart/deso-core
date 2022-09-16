@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/deso-smart/deso-core/v2/cmd"
+	"github.com/deso-smart/deso-core/v3/cmd"
 )
 
 func main() {

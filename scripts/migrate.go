@@ -1,12 +1,12 @@
 package main
 
 import (
-	"github.com/deso-smart/deso-core/v2/lib"
+	"github.com/deso-smart/deso-core/v3/lib"
 	"github.com/go-pg/pg/v10"
 	"log"
 	"os"
 
-	"github.com/deso-smart/deso-core/v2/migrate"
+	"github.com/deso-smart/deso-core/v3/migrate"
 	migrations "github.com/robinjoseph08/go-pg-migrations/v3"
 )
 

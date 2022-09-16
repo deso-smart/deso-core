@@ -1,6 +1,6 @@
-module github.com/deso-smart/deso-core/v2
+module github.com/deso-smart/deso-core/v3
 
-go 1.17
+go 1.18
 
 require (
 	github.com/DataDog/datadog-go v4.5.0+incompatible
@@ -11,7 +11,8 @@ require (
 	github.com/bxcodec/faker v2.0.1+incompatible
 	github.com/cloudflare/circl v1.1.0
 	github.com/davecgh/go-spew v1.1.1
-	github.com/decred/dcrd/lru v1.1.0
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1
+	github.com/decred/dcrd/lru v1.1.1
 	github.com/deso-protocol/go-deadlock v1.0.0
 	github.com/deso-protocol/go-merkle-tree v1.0.0
 	github.com/dgraph-io/badger/v3 v3.2103.0

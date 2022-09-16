@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/deso-smart/deso-core/v2/migrate"
+	"github.com/deso-smart/deso-core/v3/migrate"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/go-pg/pg/v10"
 	"net"
@@ -19,7 +19,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/deso-protocol/go-deadlock"
-	"github.com/deso-smart/deso-core/v2/lib"
+	"github.com/deso-smart/deso-core/v3/lib"
 	"github.com/golang/glog"
 	migrations "github.com/robinjoseph08/go-pg-migrations/v3"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
@@ -225,7 +225,7 @@ func (node *Node) Start(exitChannels ...*chan struct{}) {
 		node.Config.TrustedBlockProducerStartHeight,
 		eventManager,
 		node.nodeMessageChan,
-	)
+		node.Config.ForceChecksum)
 	if err != nil {
 		if shouldRestart {
 			glog.Infof(lib.CLog(lib.Red, fmt.Sprintf("Start: Got en error while starting server and shouldRestart "+

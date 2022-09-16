@@ -1,11 +1,11 @@
-package testing
+package integration_testing
 
 import (
 	"encoding/hex"
 	"fmt"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/deso-smart/deso-core/v2/cmd"
-	"github.com/deso-smart/deso-core/v2/lib"
+	"github.com/deso-smart/deso-core/v3/cmd"
+	"github.com/deso-smart/deso-core/v3/lib"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/golang/glog"
 	"github.com/pkg/errors"

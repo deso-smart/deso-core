@@ -1,8 +1,8 @@
-package testing
+package integration_testing
 
 import (
-	"github.com/deso-smart/deso-core/v2/cmd"
-	"github.com/deso-smart/deso-core/v2/lib"
+	"github.com/deso-smart/deso-core/v3/cmd"
+	"github.com/deso-smart/deso-core/v3/lib"
 	"github.com/stretchr/testify/require"
 	"os"
 	"testing"

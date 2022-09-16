@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/wire"
-	"github.com/deso-smart/deso-core/v2/desohash"
+	"github.com/deso-smart/deso-core/v3/desohash"
 
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/davecgh/go-spew/spew"
@@ -124,7 +124,7 @@ func (desoMiner *DeSoMiner) _mineSingleBlock(threadIndex uint32) (_diffTarget *B
 		// Compute a few hashes before checking if we've solved the block.
 		timeBefore := time.Now()
 		bestHash, bestNonce, err := FindLowestHash(header, desoMiner.params.MiningIterationsPerCycle)
-		glog.V(2).Infof("DeSoMiner._startThread: Time per iteration: %v", time.Since(timeBefore))
+		glog.V(3).Infof("DeSoMiner._startThread: Time per iteration: %v", time.Since(timeBefore))
 		if err != nil {
 			// If there's an error just log it and break out.
 			glog.Error(errors.Wrapf(err, "DeSoMiner._startThread: Problem while mining: "))
