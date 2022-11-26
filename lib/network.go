@@ -573,7 +573,10 @@ func ReadMessage(rr io.Reader, networkType NetworkType) (DeSoMessage, []byte, er
 	}
 
 	// Read the payload.
-	payload := make([]byte, payloadLength)
+	payload, err := SafeMakeSliceWithLength[byte](payloadLength)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ReadMessage: PRoblem creating slice of length %v for payload", payloadLength)
+	}
 	_, err = io.ReadFull(rr, payload)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "ReadMessage: Could not read payload for message type (%s)", MsgType(inMsgType))
@@ -1423,7 +1426,10 @@ func (msg *MsgDeSoVersion) FromBytes(data []byte) error {
 		if strLen > MaxMessagePayload {
 			return fmt.Errorf("MsgDeSoVersion.FromBytes: Length msg.UserAgent %d larger than max allowed %d", strLen, MaxMessagePayload)
 		}
-		userAgent := make([]byte, strLen)
+		userAgent, err := SafeMakeSliceWithLength[byte](strLen)
+		if err != nil {
+			return fmt.Errorf("MsgDeSoVersion.FromBytes: PRoblem creating slice of length %d for user agent", strLen)
+		}
 		_, err = io.ReadFull(rr, userAgent)
 		if err != nil {
 			return errors.Wrapf(err, "MsgDeSoVersion.FromBytes: Error reading msg.UserAgent")
@@ -1581,7 +1587,11 @@ func (msg *MsgDeSoAddr) FromBytes(data []byte) error {
 		if ipLen != 4 && ipLen != 16 {
 			return fmt.Errorf("MsgDeSoAddr.FromBytes: IP length must be 4 or 16 bytes but was %d", ipLen)
 		}
-		currentAddr.IP = net.IP(make([]byte, ipLen))
+		currentAddrIPSlice, err := SafeMakeSliceWithLength[byte](ipLen)
+		if err != nil {
+			return fmt.Errorf("MsgDeSoAddr.FromBytes: Problem making slice of length %d for currentAddr.IP", ipLen)
+		}
+		currentAddr.IP = net.IP(currentAddrIPSlice)
 		_, err = io.ReadFull(rr, currentAddr.IP)
 		if err != nil {
 			return errors.Wrapf(err, "MsgDeSoAddr.FromBytes: Error reading IP")
@@ -2063,7 +2073,10 @@ func (bpi *BlockProducerInfo) Deserialize(data []byte) error {
 		if pkLen > MaxMessagePayload {
 			return errors.Wrapf(err, "BlockProducerInfo.Deserialize: pkLen too long: %v", pkLen)
 		}
-		pkBytes := make([]byte, pkLen)
+		pkBytes, err := SafeMakeSliceWithLength[byte](pkLen)
+		if err != nil {
+			return errors.Wrapf(err, "BlockProducerInfo.Deserialize: Problem making slice for pkBytes")
+		}
 		_, err = io.ReadFull(rr, pkBytes)
 		if err != nil {
 			return errors.Wrapf(err, "BlockProducerInfo.Deserialize: Error reading public key: ")
@@ -2080,7 +2093,10 @@ func (bpi *BlockProducerInfo) Deserialize(data []byte) error {
 		if sigLen > MaxMessagePayload {
 			return errors.Wrapf(err, "BlockProducerInfo.Deserialize: signature len too long: %v", sigLen)
 		}
-		sigBytes := make([]byte, sigLen)
+		sigBytes, err := SafeMakeSliceWithLength[byte](sigLen)
+		if err != nil {
+			return errors.Wrapf(err, "BlockProducerInfo.Deserialize: Problem making slice for sigBytes")
+		}
 		_, err = io.ReadFull(rr, sigBytes)
 		if err != nil {
 			return errors.Wrapf(err, "BlockProducerInfo.Deserialize: Error reading signature: ")
@@ -2189,7 +2205,10 @@ func (msg *MsgDeSoBlock) FromBytes(data []byte) error {
 	if hdrLen > MaxMessagePayload {
 		return fmt.Errorf("MsgDeSoBlock.FromBytes: Header length %d longer than max %d", hdrLen, MaxMessagePayload)
 	}
-	hdrBytes := make([]byte, hdrLen)
+	hdrBytes, err := SafeMakeSliceWithLength[byte](hdrLen)
+	if err != nil {
+		return errors.Wrapf(err, "MsgDeSoBlock.FromBytes: Problem creating slice for header")
+	}
 	_, err = io.ReadFull(rr, hdrBytes)
 	if err != nil {
 		return errors.Wrapf(err, "MsgDeSoBlock.FromBytes: Problem reading header")
@@ -2214,7 +2233,10 @@ func (msg *MsgDeSoBlock) FromBytes(data []byte) error {
 		if txBytesLen > MaxMessagePayload {
 			return fmt.Errorf("MsgDeSoBlock.FromBytes: Txn %d length %d longer than max %d", ii, hdrLen, MaxMessagePayload)
 		}
-		txBytes := make([]byte, txBytesLen)
+		txBytes, err := SafeMakeSliceWithLength[byte](txBytesLen)
+		if err != nil {
+			return errors.Wrapf(err, "MsgDeSoBlock.FromBytes: Problem making slice for txBytes")
+		}
 		_, err = io.ReadFull(rr, txBytes)
 		if err != nil {
 			return errors.Wrapf(err, "MsgDeSoBlock.FromBytes: Problem reading tx bytes")
@@ -2241,13 +2263,18 @@ func (msg *MsgDeSoBlock) FromBytes(data []byte) error {
 				return fmt.Errorf("MsgDeSoBlock.FromBytes: Header length %d longer "+
 					"than max %d", blockProducerInfoLen, MaxMessagePayload)
 			}
-			blockProducerInfoBytes := make([]byte, blockProducerInfoLen)
+			blockProducerInfoBytes, err := SafeMakeSliceWithLength[byte](blockProducerInfoLen)
+			if err != nil {
+				return errors.Wrapf(err, "MsgDeSoBlock.FromBytes: Problem creating slice for block producer info bytes")
+			}
 			_, err = io.ReadFull(rr, blockProducerInfoBytes)
 			if err != nil {
 				return errors.Wrapf(err, "MsgDeSoBlock.FromBytes: Problem reading header")
 			}
 			blockProducerInfo = &BlockProducerInfo{}
-			blockProducerInfo.Deserialize(blockProducerInfoBytes)
+			if err = blockProducerInfo.Deserialize(blockProducerInfoBytes); err != nil {
+				return errors.Wrapf(err, "MsgDeSoBlock.FromBytes: Error deserializing block producer info")
+			}
 			ret.BlockProducerInfo = blockProducerInfo
 		}
 	}
@@ -2380,7 +2407,10 @@ func (msg *MsgDeSoSnapshotData) FromBytes(data []byte) error {
 	if err != nil {
 		return errors.Wrapf(err, "MsgDeSoSnapshotData.FromBytes: Problem decoding length of prefix")
 	}
-	msg.Prefix = make([]byte, prefixLen)
+	msg.Prefix, err = SafeMakeSliceWithLength[byte](prefixLen)
+	if err != nil {
+		return errors.Wrapf(err, "MsgDeSoSnapshotData.FromBytes: Problem creating slice for prefix")
+	}
 	_, err = io.ReadFull(rr, msg.Prefix)
 	if err != nil {
 		return errors.Wrapf(err, "MsgDeSoSnapshotData.FromBytes: Problem decoding prefix")
@@ -2588,8 +2618,10 @@ func (desoSign *DeSoSignature) FromBytes(signatureBytes []byte) error {
 	}
 
 	// Copy the signature bytes to make so that we can freely modify it.
-	var err error
-	signatureBytesCopy := make([]byte, len(signatureBytes))
+	signatureBytesCopy, err := SafeMakeSliceWithLength[byte](uint64(len(signatureBytes)))
+	if err != nil {
+		return fmt.Errorf("FromBytes: Problem creating slice for signatureBytesCopy")
+	}
 	copy(signatureBytesCopy, signatureBytes)
 	// If header magic contains the recovery Id, we will retrieve it.
 	if signatureBytes[0] > derSigMagicOffset {
@@ -2915,7 +2947,10 @@ func _readTransaction(rr io.Reader) (*MsgDeSoTxn, error) {
 	if metaLen > MaxMessagePayload {
 		return nil, fmt.Errorf("_readTransaction.FromBytes: metaLen length %d longer than max %d", metaLen, MaxMessagePayload)
 	}
-	metaBuf := make([]byte, metaLen)
+	metaBuf, err := SafeMakeSliceWithLength[byte](metaLen)
+	if err != nil {
+		return nil, fmt.Errorf("_readTransaction.FromBytes: Problem creating slice for metaBuf")
+	}
 	_, err = io.ReadFull(rr, metaBuf)
 	if err != nil {
 		return nil, errors.Wrapf(err, "_readTransaction: Problem reading TxnMeta")
@@ -2935,7 +2970,10 @@ func _readTransaction(rr io.Reader) (*MsgDeSoTxn, error) {
 	}
 	ret.PublicKey = nil
 	if pkLen != 0 {
-		ret.PublicKey = make([]byte, pkLen)
+		ret.PublicKey, err = SafeMakeSliceWithLength[byte](pkLen)
+		if err != nil {
+			return nil, fmt.Errorf("_readTransaction.FromBytes: Problem making slice for PublicKey")
+		}
 		_, err = io.ReadFull(rr, ret.PublicKey)
 		if err != nil {
 			return nil, errors.Wrapf(err, "_readTransaction: Problem reading DeSoTxn.PublicKey")
@@ -2960,14 +2998,17 @@ func _readTransaction(rr io.Reader) (*MsgDeSoTxn, error) {
 
 	ret.Signature.SetSignature(nil)
 	if sigLen != 0 {
-		sigBytes := make([]byte, sigLen)
+		sigBytes, err := SafeMakeSliceWithLength[byte](sigLen)
+		if err != nil {
+			return nil, fmt.Errorf("_readTransaction.FromBytes: Problem making slice for sigBytes")
+		}
 		_, err = io.ReadFull(rr, sigBytes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "_readTransaction: Problem reading DeSoTxn.Signature")
 		}
 
 		// Verify that the signature is valid.
-		err := ret.Signature.FromBytes(sigBytes)
+		err = ret.Signature.FromBytes(sigBytes)
 		if err != nil {
 			return nil, errors.Wrapf(err, "_readTransaction: Problem parsing DeSoTxn.Signature bytes")
 		}
@@ -3233,7 +3274,10 @@ func (txnData *BlockRewardMetadataa) FromBytes(dataa []byte) error {
 			"BLOCK_REWARD txn ExtraData length (%d) cannot be longer than "+
 				"(%d) bytes", numExtraDataBytes, MaxBlockRewardDataSizeBytes)
 	}
-	ret.ExtraData = make([]byte, numExtraDataBytes)
+	ret.ExtraData, err = SafeMakeSliceWithLength[byte](numExtraDataBytes)
+	if err != nil {
+		return errors.Wrapf(err, "BlockRewardMetadataa.FromBytes: Problem creating slice for extradata")
+	}
 	_, err = io.ReadFull(rr, ret.ExtraData[:])
 	if err != nil {
 		return errors.Wrapf(err, "BlockRewardMetadataa.FromBytes: Problem reading ExtraData")
@@ -3350,7 +3394,10 @@ func (txnData *BitcoinExchangeMetadata) FromBytes(data []byte) error {
 		return fmt.Errorf("BitcoinExchangeMetadata.FromBytes: txnBytesLen %d "+
 			"exceeds max %d", txnBytesLen, MaxMessagePayload)
 	}
-	txnBytes := make([]byte, txnBytesLen)
+	txnBytes, err := SafeMakeSliceWithLength[byte](txnBytesLen)
+	if err != nil {
+		return fmt.Errorf("BitcoinExchangeMetadata.FromBytes: Problem making slice for txnBytes")
+	}
 	_, err = io.ReadFull(rr, txnBytes)
 	if err != nil {
 		return fmt.Errorf("BitcoinExchangeMetadata.FromBytes: Error reading txnBytes: %v", err)
@@ -3493,7 +3540,10 @@ func (txnData *PrivateMessageMetadata) FromBytes(data []byte) error {
 		return fmt.Errorf("PrivateMessageMetadata.FromBytes: encryptedTextLen %d "+
 			"exceeds max %d", encryptedTextLen, MaxMessagePayload)
 	}
-	ret.EncryptedText = make([]byte, encryptedTextLen)
+	ret.EncryptedText, err = SafeMakeSliceWithLength[byte](encryptedTextLen)
+	if err != nil {
+		return errors.Wrapf(err, "PrivateMessageMetadata.FromBytes: Problem making slice for encrypted text")
+	}
 	_, err = io.ReadFull(rr, ret.EncryptedText)
 	if err != nil {
 		return fmt.Errorf("PrivateMessageMetadata.FromBytes: Error reading EncryptedText: %v", err)
@@ -3765,17 +3815,20 @@ func (txnData *SubmitPostMetadata) ToBytes(preSignature bool) ([]byte, error) {
 func ReadVarString(rr io.Reader) ([]byte, error) {
 	StringLen, err := ReadUvarint(rr)
 	if err != nil {
-		return nil, errors.Wrapf(err, "SubmitPostMetadata.FromBytes: Problem "+
+		return nil, errors.Wrapf(err, "ReadVarString: Problem "+
 			"decoding String length")
 	}
 	if StringLen > MaxMessagePayload {
-		return nil, fmt.Errorf("SubmitPostMetadata.FromBytes: StringLen %d "+
+		return nil, fmt.Errorf("ReadVarString: StringLen %d "+
 			"exceeds max %d", StringLen, MaxMessagePayload)
 	}
-	ret := make([]byte, StringLen)
+	ret, err := SafeMakeSliceWithLength[byte](StringLen)
+	if err != nil {
+		return nil, errors.Wrapf(err, "ReadVarString: Problem making slice for var string")
+	}
 	_, err = io.ReadFull(rr, ret)
 	if err != nil {
-		return nil, fmt.Errorf("SubmitPostMetadata.FromBytes: Error reading StringText: %v", err)
+		return nil, fmt.Errorf("ReadVarString: Error reading StringText: %v", err)
 	}
 
 	return ret, nil
@@ -4533,7 +4586,10 @@ func (txnData *AcceptNFTBidMetadata) FromBytes(dataa []byte) error {
 		return fmt.Errorf("AcceptNFTBidMetadata.FromBytes: unlockableTextLen %d "+
 			"exceeds max %d", unlockableTextLen, MaxMessagePayload)
 	}
-	ret.UnlockableText = make([]byte, unlockableTextLen)
+	ret.UnlockableText, err = SafeMakeSliceWithLength[byte](unlockableTextLen)
+	if err != nil {
+		return fmt.Errorf("AcceptNFTBidMetadata.FromBytes: Problem making slice for unlockable text")
+	}
 	_, err = io.ReadFull(rr, ret.UnlockableText)
 	if err != nil {
 		return fmt.Errorf("AcceptNFTBidMetadata.FromBytes: Error reading EncryptedText: %v", err)
@@ -4717,7 +4773,10 @@ func (txnData *NFTTransferMetadata) FromBytes(dataa []byte) error {
 		return fmt.Errorf("NFTTransferMetadata.FromBytes: unlockableTextLen %d "+
 			"exceeds max %d", unlockableTextLen, MaxMessagePayload)
 	}
-	ret.UnlockableText = make([]byte, unlockableTextLen)
+	ret.UnlockableText, err = SafeMakeSliceWithLength[byte](unlockableTextLen)
+	if err != nil {
+		return errors.Wrapf(err, "NFTTransferMetadata.FromBytes: Problem making slice for unlockable text")
+	}
 	_, err = io.ReadFull(rr, ret.UnlockableText)
 	if err != nil {
 		return fmt.Errorf("NFTTransferMetadata.FromBytes: Error reading EncryptedText: %v", err)
@@ -5151,7 +5210,10 @@ func (tsl *TransactionSpendingLimit) ToBytes(blockHeight uint64) ([]byte, error)
 	data = append(data, UintToBuf(transactionCountLimitMapLength)...)
 	if transactionCountLimitMapLength > 0 {
 		// Sort the keys
-		keys := make([]TxnType, 0, transactionCountLimitMapLength)
+		keys, err := SafeMakeSliceWithLengthAndCapacity[TxnType](0, transactionCountLimitMapLength)
+		if err != nil {
+			return nil, err
+		}
 		for key := range tsl.TransactionCountLimitMap {
 			keys = append(keys, key)
 		}
@@ -5169,7 +5231,10 @@ func (tsl *TransactionSpendingLimit) ToBytes(blockHeight uint64) ([]byte, error)
 	ccOperationLimitMapLength := uint64(len(tsl.CreatorCoinOperationLimitMap))
 	data = append(data, UintToBuf(ccOperationLimitMapLength)...)
 	if ccOperationLimitMapLength > 0 {
-		keys := make([]CreatorCoinOperationLimitKey, 0, ccOperationLimitMapLength)
+		keys, err := SafeMakeSliceWithLengthAndCapacity[CreatorCoinOperationLimitKey](0, ccOperationLimitMapLength)
+		if err != nil {
+			return nil, err
+		}
 		for key := range tsl.CreatorCoinOperationLimitMap {
 			keys = append(keys, key)
 		}
@@ -5186,7 +5251,10 @@ func (tsl *TransactionSpendingLimit) ToBytes(blockHeight uint64) ([]byte, error)
 	daoCoinOperationLimitMapLength := uint64(len(tsl.DAOCoinOperationLimitMap))
 	data = append(data, UintToBuf(daoCoinOperationLimitMapLength)...)
 	if daoCoinOperationLimitMapLength > 0 {
-		keys := make([]DAOCoinOperationLimitKey, 0, daoCoinOperationLimitMapLength)
+		keys, err := SafeMakeSliceWithLengthAndCapacity[DAOCoinOperationLimitKey](0, daoCoinOperationLimitMapLength)
+		if err != nil {
+			return nil, err
+		}
 		for key := range tsl.DAOCoinOperationLimitMap {
 			keys = append(keys, key)
 		}
@@ -5203,7 +5271,10 @@ func (tsl *TransactionSpendingLimit) ToBytes(blockHeight uint64) ([]byte, error)
 	nftOperationLimitMapLength := uint64(len(tsl.NFTOperationLimitMap))
 	data = append(data, UintToBuf(nftOperationLimitMapLength)...)
 	if nftOperationLimitMapLength > 0 {
-		keys := make([]NFTOperationLimitKey, 0, nftOperationLimitMapLength)
+		keys, err := SafeMakeSliceWithLengthAndCapacity[NFTOperationLimitKey](0, nftOperationLimitMapLength)
+		if err != nil {
+			return nil, err
+		}
 		for key := range tsl.NFTOperationLimitMap {
 			keys = append(keys, key)
 		}
@@ -5220,7 +5291,10 @@ func (tsl *TransactionSpendingLimit) ToBytes(blockHeight uint64) ([]byte, error)
 	daoCoinLimitOrderLimitMapLength := uint64(len(tsl.DAOCoinLimitOrderLimitMap))
 	data = append(data, UintToBuf(daoCoinLimitOrderLimitMapLength)...)
 	if daoCoinLimitOrderLimitMapLength > 0 {
-		keys := make([]DAOCoinLimitOrderLimitKey, 0, daoCoinLimitOrderLimitMapLength)
+		keys, err := SafeMakeSliceWithLengthAndCapacity[DAOCoinLimitOrderLimitKey](0, daoCoinLimitOrderLimitMapLength)
+		if err != nil {
+			return nil, err
+		}
 		for key := range tsl.DAOCoinLimitOrderLimitMap {
 			keys = append(keys, key)
 		}
@@ -5525,7 +5599,10 @@ func (nftOperationLimitKey *NFTOperationLimitKey) Decode(rr *bytes.Reader) error
 		return err
 	}
 	// De-serialize the key
-	blockhashBytes := make([]byte, blockHashLen)
+	blockhashBytes, err := SafeMakeSliceWithLength[byte](blockHashLen)
+	if err != nil {
+		return err
+	}
 	if _, err = io.ReadFull(rr, blockhashBytes); err != nil {
 		return err
 	}
@@ -5634,7 +5711,10 @@ func (creatorCoinOperationLimitKey *CreatorCoinOperationLimitKey) Decode(rr *byt
 		return err
 	}
 	// De-serialize the key
-	creatorPKIDBytes := make([]byte, creatorPKIDBytesLen)
+	creatorPKIDBytes, err := SafeMakeSliceWithLength[byte](creatorPKIDBytesLen)
+	if err != nil {
+		return err
+	}
 	if _, err = io.ReadFull(rr, creatorPKIDBytes); err != nil {
 		return err
 	}
@@ -5748,7 +5828,10 @@ func (daoCoinOperationLimitKey *DAOCoinOperationLimitKey) Decode(rr *bytes.Reade
 		return err
 	}
 	// De-serialize the key
-	creatorPKIDBytes := make([]byte, creatorPKIDBytesLen)
+	creatorPKIDBytes, err := SafeMakeSliceWithLength[byte](creatorPKIDBytesLen)
+	if err != nil {
+		return err
+	}
 	if _, err = io.ReadFull(rr, creatorPKIDBytes); err != nil {
 		return err
 	}
@@ -5973,7 +6056,10 @@ func (txnData *DAOCoinMetadata) FromBytes(data []byte) error {
 			return fmt.Errorf("DAOCoinMetadata.FromBytes: coinsToMintLen %d "+
 				"exceeds max %d", intLen, MaxMessagePayload)
 		}
-		coinsToMintBytes := make([]byte, intLen)
+		coinsToMintBytes, err := SafeMakeSliceWithLength[byte](intLen)
+		if err != nil {
+			return errors.Wrapf(err, "DAOCoinMetadata.FromBytes: Problem making slice for coinsToMintBytes")
+		}
 		_, err = io.ReadFull(rr, coinsToMintBytes)
 		if err != nil {
 			return fmt.Errorf("DAOCoinMetadata.FromBytes: Error reading coinsToMintBytes: %v", err)
@@ -5991,7 +6077,10 @@ func (txnData *DAOCoinMetadata) FromBytes(data []byte) error {
 			return fmt.Errorf("DAOCoinMetadata.FromBytes: coinsToBurnLen %d "+
 				"exceeds max %d", intLen, MaxMessagePayload)
 		}
-		coinsToBurnBytes := make([]byte, intLen)
+		coinsToBurnBytes, err := SafeMakeSliceWithLength[byte](intLen)
+		if err != nil {
+			return errors.Wrapf(err, "DAOCoinMetadata.FromBytes: Problem making slice for coinsToBurnBytes")
+		}
 		_, err = io.ReadFull(rr, coinsToBurnBytes)
 		if err != nil {
 			return fmt.Errorf("DAOCoinMetadata.FromBytes: Error reading coinsToBurnBytes: %v", err)
@@ -6076,7 +6165,11 @@ func (txnData *DAOCoinTransferMetadata) FromBytes(data []byte) error {
 			return fmt.Errorf("DAOCoinTransferMetadata.FromBytes: coinsToTransferLen %d "+
 				"exceeds max %d", intLen, MaxMessagePayload)
 		}
-		coinsToTransferBytes := make([]byte, intLen)
+		coinsToTransferBytes, err := SafeMakeSliceWithLength[byte](intLen)
+		if err != nil {
+			return errors.Wrapf(err,
+				"DAOCoinTransferMetadata.FromBytes: Problem creating slice for coinsToTransfer")
+		}
 		_, err = io.ReadFull(rr, coinsToTransferBytes)
 		if err != nil {
 			return fmt.Errorf("DAOCoinTransferMetadata.FromBytes: Error reading coinsToTransferBytes: %v", err)
@@ -6307,7 +6400,10 @@ func SerializePubKeyToUint64Map(mm map[PublicKey]uint64) ([]byte, error) {
 	if numKeys > 0 {
 		// Sort the keys of the map based on the mainnet public key encoding.
 		// This ensures a deterministic sorting.
-		keys := make([]string, 0, numKeys)
+		keys, err := SafeMakeSliceWithLengthAndCapacity[string](0, numKeys)
+		if err != nil {
+			return nil, err
+		}
 		for key := range mm {
 			keys = append(keys, PkToStringMainnet(key[:]))
 		}
@@ -6346,7 +6442,11 @@ func DeserializePubKeyToUint64Map(data []byte) (map[PublicKey]uint64, error) {
 		return nil, errors.Wrapf(err, "DeserializePubKeyToUint64Map.FromBytes: Problem "+
 			"reading num keys")
 	}
-	mm := make(map[PublicKey]uint64, numKeys)
+	mm, err := SafeMakeMapWithCapacity[PublicKey, uint64](numKeys)
+	if err != nil {
+		return nil, errors.Wrapf(err, "DeserializePubKeyToUint64Map.FromBytes: Problem creating "+
+			"map")
+	}
 	for ii := uint64(0); ii < numKeys; ii++ {
 		// Read in the public key bytes
 		pkBytes := make([]byte, btcec.PubKeyBytesLenCompressed)

@@ -780,7 +780,10 @@ func locateHeaders(locator []*BlockHash, stopHash *BlockHash, maxHeaders uint32,
 	}
 
 	// Populate and return the found headers.
-	headers := make([]*MsgDeSoHeader, 0, total)
+	headers, err := SafeMakeSliceWithLengthAndCapacity[*MsgDeSoHeader](0, uint64(total))
+	if err != nil {
+		// TODO: do we really want to introduce an error here?
+	}
 	for ii := uint32(0); ii < total; ii++ {
 		headers = append(headers, node.Header)
 		if uint32(len(headers)) == total {
@@ -2741,8 +2744,10 @@ func ExpectedWorkForBlockHash(hash *BlockHash) *BlockHash {
 }
 
 func ComputeTransactionHashes(txns []*MsgDeSoTxn) ([]*BlockHash, error) {
-	txHashes := make([]*BlockHash, len(txns))
-
+	txHashes, err := SafeMakeSliceWithLength[*BlockHash](uint64(len(txns)))
+	if err != nil {
+		return nil, err
+	}
 	for ii, currentTxn := range txns {
 		txHashes[ii] = currentTxn.Hash()
 	}
@@ -4152,7 +4157,7 @@ func (bc *Blockchain) CreateUpdateNFTTxn(
 	// We want our transaction to have at least one input, even if it all
 	// goes to change. This ensures that the transaction will not be "replayable."
 	if len(txn.TxInputs) == 0 {
-		return nil, 0, 0, 0, fmt.Errorf("CreateUpdateNFTTxn: AcceptNFTBid txn " +
+		return nil, 0, 0, 0, fmt.Errorf("CreateUpdateNFTTxn: CreateUpdateNFT txn " +
 			"must have at least one input but had zero inputs " +
 			"instead. Try increasing the fee rate.")
 	}
