@@ -791,7 +791,7 @@ func TestNFTBasic(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -1094,8 +1094,9 @@ func TestNFTBasic(t *testing.T) {
 		require.Contains(err.Error(), RuleErrorCreateNFTOnPostThatAlreadyIsNFT)
 	}
 
-	// Error case: cannot modify a post after it is NFTed.
+	// Error case: cannot modify a post after it is NFTed (if below specified block height).
 	{
+		params.ForkHeights.AssociationsAndAccessGroupsBlockHeight = math.MaxUint32
 		_, _, _, err := _submitPost(
 			testMeta.t, testMeta.chain, testMeta.db, testMeta.params,
 			10,
@@ -1110,6 +1111,31 @@ func TestNFTBasic(t *testing.T) {
 
 		require.Error(err)
 		require.Contains(err.Error(), RuleErrorSubmitPostCannotUpdateNFT)
+	}
+
+	// Happy path: can modify a post after it is NFTed (if above specified block height).
+	{
+		params.ForkHeights.AssociationsAndAccessGroupsBlockHeight = 1
+		testMeta.expectedSenderBalances = append(
+			testMeta.expectedSenderBalances,
+			_getBalance(testMeta.t, testMeta.chain, nil, m0Pub),
+		)
+
+		utxoOps, txn, _, err := _submitPost(
+			testMeta.t, testMeta.chain, testMeta.db, testMeta.params,
+			10,
+			m0Pub,
+			m0Priv,
+			post1Hash[:],
+			[]byte{},
+			&DeSoBodySchema{Body: "modified m0 post"},
+			[]byte{},
+			1502947011*1e9,
+			false)
+
+		require.NoError(err)
+		testMeta.txnOps = append(testMeta.txnOps, utxoOps)
+		testMeta.txns = append(testMeta.txns, txn)
 	}
 
 	// Now let's try adding a fee to creating NFT copies. This fee exists since creating
@@ -1174,7 +1200,7 @@ func TestNFTBasic(t *testing.T) {
 		nftFee := utxoView.GlobalParamsEntry.CreateNFTFeeNanos * numCopies
 
 		m0BalBeforeNFT := _getBalance(testMeta.t, testMeta.chain, nil, m0Pub)
-		require.Equal(uint64(26), m0BalBeforeNFT)
+		require.Equal(uint64(24), m0BalBeforeNFT)
 
 		extraData := map[string][]byte{
 			"rarity": []byte("high"),
@@ -1201,7 +1227,7 @@ func TestNFTBasic(t *testing.T) {
 
 		// Check that m0 was charged the correct nftFee.
 		m0BalAfterNFT := _getBalance(testMeta.t, testMeta.chain, nil, m0Pub)
-		require.Equal(uint64(25)-nftFee, m0BalAfterNFT)
+		require.Equal(uint64(23)-nftFee, m0BalAfterNFT)
 
 		nftEntry := DBGetNFTEntryByPostHashSerialNumber(db, chain.snapshot, post2Hash, 1)
 		require.Len(nftEntry.ExtraData, 1)
@@ -1649,7 +1675,7 @@ func TestNFTRoyaltiesAndSpendingOfBidderUTXOs(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -2184,7 +2210,7 @@ func TestNFTSerialNumberZeroBid(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -2512,7 +2538,7 @@ func TestNFTMinimumBidAmount(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -2764,7 +2790,7 @@ func TestNFTCreatedIsNotForSale(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -2980,7 +3006,7 @@ func TestNFTMoreErrorCases(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -3328,7 +3354,7 @@ func TestNFTBidsAreCanceledAfterAccept(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -3614,7 +3640,7 @@ func TestNFTDifferentMinBidAmountSerialNumbers(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -3905,7 +3931,7 @@ func TestNFTMaxCopiesGlobalParam(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -4219,7 +4245,7 @@ func TestNFTPreviousOwnersCantAcceptBids(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -4513,7 +4539,7 @@ func TestNFTTransfersAndBurns(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -5020,7 +5046,7 @@ func TestBidAmountZero(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -5230,7 +5256,7 @@ func TestNFTBuyNow(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -6247,7 +6273,7 @@ func TestNFTSplits(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true
@@ -7223,7 +7249,7 @@ func TestNFTSplitsHardcorePKIDBug(t *testing.T) {
 	_ = assert
 	_ = require
 
-	chain, params, db := NewLowDifficultyBlockchain()
+	chain, params, db := NewLowDifficultyBlockchain(t)
 	mempool, miner := NewTestMiner(t, chain, params, true /*isSender*/)
 	// Make m3, m4 a paramUpdater for this test
 	params.ExtraRegtestParamUpdaterKeys[MakePkMapKey(m3PkBytes)] = true

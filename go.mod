@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/DataDog/datadog-go v4.5.0+incompatible
-	github.com/NVIDIA/sortedmap v0.0.0-20210902154213-c8c741ed94c5
 	github.com/brianvoe/gofakeit v3.18.0+incompatible
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/btcsuite/btcutil v1.0.2
@@ -18,6 +17,7 @@ require (
 	github.com/dgraph-io/badger/v3 v3.2103.0
 	github.com/ethereum/go-ethereum v1.9.25
 	github.com/fatih/color v1.13.0
+	github.com/fergusstrange/embedded-postgres v1.21.0
 	github.com/gernest/mention v2.0.0+incompatible
 	github.com/go-pg/pg/v10 v10.10.0
 	github.com/golang/glog v1.0.0
@@ -42,7 +42,6 @@ require (
 require (
 	github.com/DataDog/zstd v1.4.8 // indirect
 	github.com/Microsoft/go-winio v0.4.16 // indirect
-	github.com/NVIDIA/cstruct v0.0.0-20210817223100-441a06a021c8 // indirect
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f // indirect
 	github.com/bwesterb/go-ristretto v1.2.0 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
@@ -66,6 +65,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/lib/pq v1.10.4 // indirect
 	github.com/magiconair/properties v1.8.1 // indirect
 	github.com/mattn/go-colorable v0.1.9 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
@@ -91,6 +91,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.3.1 // indirect
 	github.com/vmihailenco/tagparser v0.1.2 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/mod v0.4.2 // indirect
 	golang.org/x/net v0.0.0-20210614182718-04defd469f4e // indirect
